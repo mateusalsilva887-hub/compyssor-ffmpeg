@@ -236,7 +236,8 @@ run_test vp9.webm -c:v libvpx-vp9 -crf 30 -b:v 0 -c:a libopus
 run_test openh264.mp4 -c:v libopenh264 -pix_fmt yuv420p -c:a aac
 run_test lame.mp3 -vn -c:a libmp3lame
 run_test vorbis.ogg -vn -c:a libvorbis
-run_test tonemap.mkv -vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" -c:v libopenh264 -c:a aac
+# O testsrc2 não tem metadados de cor; setparams simula um HDR10
+run_test tonemap.mkv -vf "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" -c:v libopenh264 -c:a aac
 # VideoToolbox pode não estar disponível nas VMs do CI
 run_test videotoolbox.mp4 -c:v h264_videotoolbox -c:a aac \
   || echo "aviso: h264_videotoolbox indisponível nesta máquina de CI"
