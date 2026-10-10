@@ -87,6 +87,9 @@ autotools_build() {
 
 autotools_build libogg
 
+# O configure do libvorbis 1.3.7 passa -force_cpusubtype_ALL, que o
+# linker atual da Apple recusa (mesma correção usada pelo Homebrew).
+sed -i '' 's/ -force_cpusubtype_ALL//g' "$SRC/libvorbis/configure"
 autotools_build libvorbis \
   --disable-docs \
   --disable-examples
