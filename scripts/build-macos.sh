@@ -230,7 +230,16 @@ run_test() {
     -f lavfi -i testsrc2=s=320x240:d=2 \
     -f lavfi -i sine=d=2 \
     -shortest "$@" "$TEST/$output"
-  echo "ok: $output ($(stat -f%z "$TEST/$output") bytes)"
+
+  local size
+  size="$(stat -f%z "$TEST/$output")"
+
+  if [ "$size" -eq 0 ]; then
+    echo "falhou: $output (arquivo vazio)"
+    return 1
+  fi
+
+  echo "ok: $output ($size bytes)"
 }
 run_test vp9.webm -c:v libvpx-vp9 -crf 30 -b:v 0 -c:a libopus
 run_test openh264.mp4 -c:v libopenh264 -pix_fmt yuv420p -c:a aac
