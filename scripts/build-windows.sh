@@ -209,8 +209,10 @@ FFMPEG_CONFIGURE=(
   --enable-mediafoundation
   --enable-encoder=h264_nvenc,h264_amf,h264_qsv,h264_mf
   --extra-cflags="-I$PREFIX/include"
-  --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++"
-  --extra-libs="-l:libstdc++.a -l:libwinpthread.a"
+  # -static: o linker usa sempre a versão estática das bibliotecas
+  # (libgcc, libstdc++, winpthread); as do Windows continuam DLLs
+  --extra-ldflags="-L$PREFIX/lib -static -static-libgcc -static-libstdc++"
+  --extra-libs="-l:libstdc++.a"
 )
 
 log "build ffmpeg"
