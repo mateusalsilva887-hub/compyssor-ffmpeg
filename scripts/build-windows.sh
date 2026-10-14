@@ -163,15 +163,19 @@ cmake -S "$SRC/libvpl" -B "$SRC/libvpl/build" \
 cmake --build "$SRC/libvpl/build" -j"$JOBS"
 cmake --install "$SRC/libvpl/build"
 
-# zimg, OpenH264 e libvpl são C++: na ligação estática precisam da
-# libstdc++, que os .pc deles não declaram (mesma correção da BtbN)
+# zimg, OpenH264 e libvpl são C++ e precisam da libstdc++, que nem
+# todos os .pc declaram. "-l:libstdc++.a" força a versão estática:
+# com "-lstdc++" o linker misturava a estática e a DLL.
 for pc in zimg openh264 vpl; do
   file="$PREFIX/lib/pkgconfig/$pc.pc"
+  sed -i "s/-lstdc++/-l:libstdc++.a/g" "$file"
 
-  if grep -q "^Libs.private:" "$file"; then
-    sed -i "s/^Libs.private:.*/& -lstdc++/" "$file"
-  else
-    echo "Libs.private: -lstdc++" >> "$file"
+  if ! grep -q "^Libs.private:" "$file"; then
+    echo "Libs.private:" >> "$file"
+  fi
+
+  if ! grep -q "^Libs.private:.*-l:libstdc++.a" "$file"; then
+    sed -i "s/^Libs.private:.*/& -l:libstdc++.a/" "$file"
   fi
 
   grep "^Libs" "$file"
@@ -206,7 +210,7 @@ FFMPEG_CONFIGURE=(
   --enable-encoder=h264_nvenc,h264_amf,h264_qsv,h264_mf
   --extra-cflags="-I$PREFIX/include"
   --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++"
-  --extra-libs="-Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic"
+  --extra-libs="-l:libstdc++.a -l:libwinpthread.a"
 )
 
 log "build ffmpeg"
