@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Tag do release (ex.: ffmpeg-8.1.3-1)"
-        required: true
-        default: "ffmpeg-8.1.3-1"
+        description: "Tag do release (ex.: ffmpeg-8.1.3-2). Vazio = só gerar os arquivos."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
       - name: Ferramentas de build
         run: brew install nasm autoconf automake libtool pkgconf
 
-      - name: Compilar
+      - name: Compilar e testar
         run: bash scripts/build-macos.sh
 
       - uses: actions/upload-artifact@v4
@@ -39,8 +39,49 @@ jobs:
           path: dist/*
           retention-days: 7
 
+  windows-build:
+    name: Windows x86_64 (compilar)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ferramentas de build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            mingw-w64 nasm cmake autoconf automake libtool pkg-config zip
+
+      - name: Compilar
+        run: bash scripts/build-windows.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*
+          retention-days: 7
+
+  windows-test:
+    name: Windows x86_64 (testar)
+    needs: windows-build
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist
+
+      - name: Testar
+        shell: bash
+        run: |
+          unzip -q dist/*.zip -d build
+          bash scripts/test-ffmpeg.sh build/ffmpeg-*-windows-x86_64 h264_mf h264_nvenc h264_amf h264_qsv
+
   mirror:
-    name: Windows e Linux (BtbN)
+    name: Linux (BtbN)
     runs-on: ubuntu-latest
 
     steps:
@@ -57,7 +98,8 @@ jobs:
 
   release:
     name: Publicar release
-    needs: [macos, mirror]
+    if: inputs.release_tag != ''
+    needs: [macos, windows-test, mirror]
     runs-on: ubuntu-latest
 
     steps:
@@ -81,4 +123,4 @@ jobs:
         run: |
           gh release create "$TAG" dist/* \
             --title "$TAG" \
-            --notes "FFmpeg 8.1.3 LGPL usado pelo Compyssor. macOS compilado neste repositório; Windows e Linux copiados da BtbN (autobuild-2026-09-30-13-08). Hashes em SHA256SUMS."
+            --notes "FFmpeg 8.1.3 LGPL usado pelo Compyssor. macOS e Windows compilados neste repositório, só com os componentes que o Compyssor usa e sem protocolos de rede; Linux copiado da BtbN (autobuild-2026-09-30-13-08). Hashes em SHA256SUMS."

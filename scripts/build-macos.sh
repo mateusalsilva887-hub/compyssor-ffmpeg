@@ -143,29 +143,17 @@ cd "$ROOT"
 # FFmpeg
 # ------------------------------------------------------------
 
-# --disable-autodetect: só entra o que for pedido aqui, nada de
-# bibliotecas encontradas por acaso no sistema.
+source "$ROOT/scripts/ffmpeg-components.sh"
+
+# Bibliotecas compartilhadas em lib/, encontradas pelo ffmpeg e pelo
+# ffprobe (em bin/) através de @executable_path.
 FFMPEG_CONFIGURE=(
   --prefix="$PREFIX"
-  --pkg-config-flags=--static
-  --disable-gpl
-  --disable-nonfree
-  --disable-version3
-  --disable-autodetect
-  --enable-static
-  --disable-shared
-  --disable-ffplay
-  --disable-doc
-  --disable-debug
+  "${FFMPEG_COMMON_CONFIGURE[@]}"
+  --install-name-dir="@executable_path/../lib"
   --enable-videotoolbox
   --enable-audiotoolbox
-  --enable-zlib
-  --enable-libvpx
-  --enable-libopus
-  --enable-libmp3lame
-  --enable-libvorbis
-  --enable-libzimg
-  --enable-libopenh264
+  --enable-encoder=h264_videotoolbox
   --extra-cflags="$CFLAGS -I$PREFIX/include"
   --extra-ldflags="$LDFLAGS -L$PREFIX/lib"
   --extra-libs="-lc++"
@@ -175,81 +163,8 @@ log "build ffmpeg"
 cd "$SRC/ffmpeg"
 ./configure "${FFMPEG_CONFIGURE[@]}"
 make -j"$JOBS"
+make install
 cd "$ROOT"
-
-FFMPEG="$SRC/ffmpeg/ffmpeg"
-FFPROBE="$SRC/ffmpeg/ffprobe"
-
-# ------------------------------------------------------------
-# Verificações
-# ------------------------------------------------------------
-
-log "bibliotecas dinâmicas"
-for binary in "$FFMPEG" "$FFPROBE"; do
-  otool -L "$binary"
-
-  # Só bibliotecas do próprio macOS são aceitas
-  if otool -L "$binary" | tail -n +2 | grep -v -E "^\s+(/usr/lib/|/System/Library/)"; then
-    echo "ERRO: $binary depende de bibliotecas fora do sistema"
-    exit 1
-  fi
-done
-
-log "versão"
-"$FFMPEG" -hide_banner -version | head -3
-
-log "componentes obrigatórios"
-missing=0
-for encoder in libvpx-vp9 libopus libmp3lame libvorbis libopenh264 h264_videotoolbox aac flac pcm_s16le; do
-  if ! "$FFMPEG" -hide_banner -encoders | grep -q " $encoder "; then
-    echo "FALTANDO encoder: $encoder"
-    missing=1
-  fi
-done
-for filter in zscale tonemap; do
-  if ! "$FFMPEG" -hide_banner -filters | grep -q " $filter "; then
-    echo "FALTANDO filtro: $filter"
-    missing=1
-  fi
-done
-for muxer in mp4 mov matroska avi webm mp3 ogg opus ipod adts wav flac asf; do
-  if ! "$FFMPEG" -hide_banner -muxers | grep -q " $muxer "; then
-    echo "FALTANDO muxer: $muxer"
-    missing=1
-  fi
-done
-[ "$missing" = 0 ] || exit 1
-
-log "testes de codificação"
-TEST="$ROOT/build/test"
-mkdir -p "$TEST"
-run_test() {
-  local output="$1"
-  shift
-  "$FFMPEG" -hide_banner -loglevel error -y \
-    -f lavfi -i testsrc2=s=320x240:d=2 \
-    -f lavfi -i sine=d=2 \
-    -shortest "$@" "$TEST/$output"
-
-  local size
-  size="$(stat -f%z "$TEST/$output")"
-
-  if [ "$size" -eq 0 ]; then
-    echo "falhou: $output (arquivo vazio)"
-    return 1
-  fi
-
-  echo "ok: $output ($size bytes)"
-}
-run_test vp9.webm -c:v libvpx-vp9 -crf 30 -b:v 0 -c:a libopus
-run_test openh264.mp4 -c:v libopenh264 -pix_fmt yuv420p -c:a aac
-run_test lame.mp3 -vn -c:a libmp3lame
-run_test vorbis.ogg -vn -c:a libvorbis
-# O testsrc2 não tem metadados de cor; setparams simula um HDR10
-run_test tonemap.mkv -vf "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" -c:v libopenh264 -c:a aac
-# VideoToolbox pode não estar disponível nas VMs do CI
-run_test videotoolbox.mp4 -c:v h264_videotoolbox -c:a aac \
-  || echo "aviso: h264_videotoolbox indisponível nesta máquina de CI"
 
 # ------------------------------------------------------------
 # Pacote
@@ -259,32 +174,42 @@ log "pacote"
 NAME="ffmpeg-${FFMPEG_VERSION}-macos-${ARCH}"
 PACKAGE="$ROOT/build/$NAME"
 rm -rf "$PACKAGE"
-mkdir -p "$PACKAGE/bin"
+mkdir -p "$PACKAGE/bin" "$PACKAGE/lib"
 
-cp "$FFMPEG" "$FFPROBE" "$PACKAGE/bin/"
-strip "$PACKAGE/bin/ffmpeg" "$PACKAGE/bin/ffprobe"
+cp "$PREFIX/bin/ffmpeg" "$PREFIX/bin/ffprobe" "$PACKAGE/bin/"
+
+# Só as bibliotecas do FFmpeg, pelo nome que os binários procuram
+# (ex.: libavcodec.62.dylib); as dependências são estáticas.
+for library in $(otool -L "$PACKAGE/bin/ffmpeg" "$PACKAGE/bin/ffprobe" | grep -o '@executable_path/../lib/[^ ]*' | sort -u); do
+  cp -L "$PREFIX/lib/$(basename "$library")" "$PACKAGE/lib/"
+done
+
+strip -x "$PACKAGE"/bin/* "$PACKAGE"/lib/*
 # strip invalida a assinatura ad-hoc; Apple Silicon exige uma
-codesign --force --sign - "$PACKAGE/bin/ffmpeg" "$PACKAGE/bin/ffprobe"
+codesign --force --sign - "$PACKAGE"/lib/* "$PACKAGE"/bin/*
+
+log "bibliotecas dinâmicas"
+for binary in "$PACKAGE"/bin/* "$PACKAGE"/lib/*; do
+  otool -L "$binary"
+
+  # Só bibliotecas do macOS ou do próprio pacote
+  if otool -L "$binary" | tail -n +2 | grep -v -E "^\s+(/usr/lib/|/System/Library/|@executable_path/../lib/)"; then
+    echo "ERRO: $binary depende de bibliotecas de fora do pacote"
+    exit 1
+  fi
+done
 
 cp "$SRC/ffmpeg/COPYING.LGPLv2.1" "$PACKAGE/LICENSE.txt"
+write_source_txt "$PACKAGE/SOURCE.txt" "build LGPL para macOS ${ARCH}" "${FFMPEG_CONFIGURE[@]}"
 
-{
-  echo "FFmpeg ${FFMPEG_VERSION} — build LGPL para macOS ${ARCH}"
-  echo "Compilado por https://github.com/${GITHUB_REPOSITORY:-local}"
-  echo
-  echo "Licença: LGPL 2.1 (ver LICENSE.txt)."
-  echo "Pela LGPL, o código-fonte correspondente está disponível em:"
-  echo
-  for entry in "${SOURCES[@]}"; do
-    IFS="|" read -r name url sha <<< "$entry"
-    echo "  $name"
-    echo "    $url"
-    echo "    sha256: $sha"
-  done
-  echo
-  echo "Configuração do FFmpeg:"
-  echo "  ${FFMPEG_CONFIGURE[*]}"
-} > "$PACKAGE/SOURCE.txt"
+du -sh "$PACKAGE"
+
+# ------------------------------------------------------------
+# Testes
+# ------------------------------------------------------------
+
+log "testes"
+bash "$ROOT/scripts/test-ffmpeg.sh" "$PACKAGE" h264_videotoolbox
 
 mkdir -p "$DIST"
 tar -C "$ROOT/build" -cJf "$DIST/$NAME.tar.xz" "$NAME"
