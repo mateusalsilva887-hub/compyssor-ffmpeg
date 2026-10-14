@@ -78,6 +78,40 @@ write_source_txt() {
   } > "$file"
 }
 
+# Copia para <pacote>/licenses o texto de licença de cada dependência
+# incluída no build (BSD, MIT e zlib exigem o texto junto do binário).
+# Usa os nomes de SOURCES; dependências ausentes neste sistema são
+# ignoradas.
+collect_licenses() {
+  local package="$1"
+  local target="$package/licenses"
+  mkdir -p "$target"
+
+  local entry name url sha file
+  for entry in "${SOURCES[@]}"; do
+    IFS="|" read -r name url sha <<< "$entry"
+
+    case "$name" in
+      ffmpeg)
+        continue ;;
+      nv-codec-headers)
+        # Licença MIT no comentário inicial do cabeçalho
+        sed -n '1,/\*\//p' "$SRC/$name/include/ffnvcodec/nvEncodeAPI.h" > "$target/$name.txt" ;;
+      amf-headers)
+        # Licença MIT nas linhas de comentário "//" do início
+        sed -n '/^\/\//!q;p' "$SRC/$name/AMF/core/Factory.h" > "$target/$name.txt" ;;
+      *)
+        for file in COPYING LICENSE PATENTS; do
+          if [ -f "$SRC/$name/$file" ]; then
+            cp "$SRC/$name/$file" "$target/$name-$file.txt"
+          fi
+        done ;;
+    esac
+  done
+
+  ls "$target"
+}
+
 join_by_comma() {
   local IFS=","
   echo "$*"

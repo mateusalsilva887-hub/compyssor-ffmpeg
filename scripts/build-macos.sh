@@ -201,6 +201,7 @@ done
 
 cp "$SRC/ffmpeg/COPYING.LGPLv2.1" "$PACKAGE/LICENSE.txt"
 write_source_txt "$PACKAGE/SOURCE.txt" "build LGPL para macOS ${ARCH}" "${FFMPEG_CONFIGURE[@]}"
+collect_licenses "$PACKAGE"
 
 du -sh "$PACKAGE"
 

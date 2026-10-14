@@ -163,6 +163,20 @@ cmake -S "$SRC/libvpl" -B "$SRC/libvpl/build" \
 cmake --build "$SRC/libvpl/build" -j"$JOBS"
 cmake --install "$SRC/libvpl/build"
 
+# zimg, OpenH264 e libvpl são C++: na ligação estática precisam da
+# libstdc++, que os .pc deles não declaram (mesma correção da BtbN)
+for pc in zimg openh264 vpl; do
+  file="$PREFIX/lib/pkgconfig/$pc.pc"
+
+  if grep -q "^Libs.private:" "$file"; then
+    sed -i "s/^Libs.private:.*/& -lstdc++/" "$file"
+  else
+    echo "Libs.private: -lstdc++" >> "$file"
+  fi
+
+  grep "^Libs" "$file"
+done
+
 # ------------------------------------------------------------
 # FFmpeg
 # ------------------------------------------------------------
@@ -197,7 +211,10 @@ FFMPEG_CONFIGURE=(
 
 log "build ffmpeg"
 cd "$SRC/ffmpeg"
-./configure "${FFMPEG_CONFIGURE[@]}"
+if ! ./configure "${FFMPEG_CONFIGURE[@]}"; then
+  tail -n 60 ffbuild/config.log
+  exit 1
+fi
 make -j"$JOBS"
 make install
 cd "$ROOT"
@@ -238,6 +255,7 @@ done
 
 cp "$SRC/ffmpeg/COPYING.LGPLv2.1" "$PACKAGE/LICENSE.txt"
 write_source_txt "$PACKAGE/SOURCE.txt" "build LGPL para Windows x86_64" "${FFMPEG_CONFIGURE[@]}"
+collect_licenses "$PACKAGE"
 
 du -sh "$PACKAGE"
 ls -la "$PACKAGE/bin"
